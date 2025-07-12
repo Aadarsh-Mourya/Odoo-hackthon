@@ -13,6 +13,31 @@ import RegisterPage from './pages/RegisterPage';
 import DashboardPage from './pages/DashboardPage';
 import BrowsePage from './pages/BrowsePage';
 import AddItemPage from './pages/AddItemPage';
+import ItemPage from './pages/ItemPage';
+
+// Admin Pages
+import AdminPanel from './pages/admin/AdminPanel';
+import AdminUsersPage from './pages/admin/AdminUsersPage';
+import AdminListingsPage from './pages/admin/AdminListingsPage';
+import AdminOrdersPage from './pages/admin/AdminOrdersPage';
+import AdminDashboardPage from './pages/admin/AdminDashboardPage';
+import AdminSettingsPage from './pages/admin/AdminSettingsPage';
+
+// Admin Route Component
+const AdminRoute = ({ children }) => {
+  const { isAuthenticated, isLoading, user } = useAuth();
+  
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <LoadingSpinner size="lg" />
+      </div>
+    );
+  }
+  
+  return isAuthenticated && user?.isAdmin ? children : <Navigate to="/dashboard" />;
+};
+
 // Protected Route Component
 const ProtectedRoute = ({ children }) => {
   const { isAuthenticated, isLoading } = useAuth();
@@ -153,6 +178,15 @@ function App() {
             />
 
             <Route 
+              path="/items/:id" 
+              element={
+                <Layout>
+                  <ItemPage />
+                </Layout>
+              } 
+            />
+
+            <Route 
               path="/how-it-works" 
               element={
                 <Layout>
@@ -165,6 +199,20 @@ function App() {
                 </Layout>
               } 
             />
+
+            {/* Admin Routes */}
+            <Route path="/admin" element={
+              <AdminRoute>
+                <AdminPanel />
+              </AdminRoute>
+            }>
+              <Route path="users" element={<AdminUsersPage />} />
+              <Route path="listings" element={<AdminListingsPage />} />
+              <Route path="orders" element={<AdminOrdersPage />} />
+              <Route path="dashboard" element={<AdminDashboardPage />} />
+              <Route path="settings" element={<AdminSettingsPage />} />
+              <Route index element={<Navigate to="/admin/dashboard" replace />} />
+            </Route>
 
             {/* Catch-all route */}
             <Route 

@@ -10,6 +10,7 @@ const itemRoutes = require('./routes/items');
 const adminRoutes = require('./routes/admin');
 const publicRoutes = require('./routes/public');
 const redemptionRoutes = require('./routes/redemptions');
+const itemsRouter = require('./routes/items');
 
 // Initialize database
 const createTables = require('./migrations/migrate');
@@ -43,6 +44,7 @@ app.use('/api/items', itemRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/public', publicRoutes);
 app.use('/api/redemptions', redemptionRoutes);
+app.use('/api/items', itemsRouter);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

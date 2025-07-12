@@ -4,6 +4,9 @@ const pool = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
 const upload = require('../middleware/upload');
 const rateLimit = require('express-rate-limit');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 
 const router = express.Router();
 
@@ -12,6 +15,38 @@ const createItemLimit = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 5, // Limit each user to 5 item creations per windowMs
   message: 'Too many items created, please try again later.'
+});
+
+// Configure storage for file uploads
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const uploadDir = path.join(__dirname, '../uploads');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const ext = path.extname(file.originalname);
+    cb(null, 'item-' + uniqueSuffix + ext);
+  }
+});
+
+const uploadMiddleware = multer({ 
+  storage: storage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = /jpeg|jpg|png|webp/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedTypes.test(file.mimetype);
+    
+    if (extname && mimetype) {
+      return cb(null, true);
+    } else {
+      cb(new Error('Only image files (jpeg, jpg, png, webp) are allowed!'));
+    }
+  }
 });
 
 // Get all approved items with filters
@@ -135,7 +170,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // Create new item
-router.post('/', authenticateToken, createItemLimit, upload.array('images', 5), [
+router.post('/', authenticateToken, createItemLimit, uploadMiddleware.array('images', 5), [
   body('title').notEmpty().trim().isLength({ max: 255 }),
   body('description').optional().trim(),
   body('categoryId').isInt(),
@@ -145,43 +180,152 @@ router.post('/', authenticateToken, createItemLimit, upload.array('images', 5), 
   body('pointValue').isInt({ min: 1 }),
   body('tags').optional().isArray()
 ], async (req, res) => {
+  const client = await pool.connect();
   try {
+    // Log the incoming request details for debugging
+    console.log('Request body:', req.body);
+    console.log('Files received:', req.files ? req.files.length : 0);
+    
+    // Validate the request
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+      console.log('Validation errors:', errors.array());
+      return res.status(400).json({ 
+        error: 'Validation failed', 
+        details: errors.array() 
+      });
     }
-
-    const { title, description, categoryId, type, size, condition, pointValue, tags } = req.body;
     
-    // Process uploaded images
-    const images = req.files ? req.files.map(file => file.filename) : [];
+    await client.query('BEGIN');
     
-    if (images.length === 0) {
+    const userId = req.user.id;
+    const { 
+      title, description, categoryId, size, condition, pointValue, brand, type 
+    } = req.body;
+    
+    // Validate data types explicitly
+    const categoryIdNum = parseInt(categoryId, 10);
+    const pointValueNum = parseInt(pointValue, 10);
+    
+    console.log('Parsed values:', {
+      categoryIdNum,
+      pointValueNum,
+      userId
+    });
+    
+    if (isNaN(categoryIdNum)) {
+      return res.status(400).json({ error: 'Category ID must be a number', value: categoryId });
+    }
+    
+    if (isNaN(pointValueNum)) {
+      return res.status(400).json({ error: 'Point value must be a number', value: pointValue });
+    }
+    
+    // Validation
+    if (!title || !description || !categoryId || !size || !condition || !pointValue) {
+      return res.status(400).json({ 
+        error: 'All required fields must be provided',
+        missing: !title ? 'title' : !description ? 'description' : !categoryId ? 'categoryId' : !size ? 'size' : !condition ? 'condition' : 'pointValue'
+      });
+    }
+    
+    // Check if files were uploaded
+    if (!req.files || req.files.length === 0) {
       return res.status(400).json({ error: 'At least one image is required' });
     }
-
-    // Verify category exists
-    const categoryCheck = await pool.query('SELECT id FROM categories WHERE id = $1', [categoryId]);
-    if (categoryCheck.rows.length === 0) {
-      return res.status(400).json({ error: 'Invalid category ID' });
+    
+    // Ensure the uploads directory exists
+    const uploadDir = path.join(__dirname, '../uploads');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
     }
-
-    const result = await pool.query(`
-      INSERT INTO items (user_id, title, description, category_id, type, size, condition, point_value, images, tags)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-      RETURNING *
-    `, [req.user.id, title, description, categoryId, type, size, condition, pointValue, images, tags || []]);
-
-    const item = result.rows[0];
-
-    res.status(201).json({
+    
+    // Check if the brand column exists before using it
+    const checkBrandColumn = await client.query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name = 'items' AND column_name = 'brand'
+    `);
+    
+    const brandColumnExists = checkBrandColumn.rows.length > 0;
+    
+    // Adjust the SQL query based on whether the brand column exists
+    let insertQuery, insertValues;
+    
+    if (brandColumnExists) {
+      insertQuery = `
+        INSERT INTO items (
+          user_id, title, description, category_id, size, condition, 
+          point_value, brand, type, is_available, is_approved, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+        RETURNING id
+      `;
+      insertValues = [
+        userId, title, description, categoryIdNum, size, condition, 
+        pointValueNum, brand || null, type || null, true, false
+      ];
+    } else {
+      // Alternative query without the brand column
+      insertQuery = `
+        INSERT INTO items (
+          user_id, title, description, category_id, size, condition, 
+          point_value, type, is_available, is_approved, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+        RETURNING id
+      `;
+      insertValues = [
+        userId, title, description, categoryIdNum, size, condition, 
+        pointValueNum, type || null, true, false
+      ];
+    }
+    
+    const itemResult = await client.query(insertQuery, insertValues);
+    
+    const itemId = itemResult.rows[0].id;
+    console.log('Created item with ID:', itemId);
+    
+    // Handle image uploads
+    const imageFilenames = req.files.map(file => path.basename(file.path));
+    console.log('Image filenames:', imageFilenames);
+    
+    // Store image filenames in the database
+    if (imageFilenames.length > 0) {
+      await client.query(
+        `UPDATE items SET images = $1 WHERE id = $2`,
+        [imageFilenames, itemId]
+      );
+    }
+    
+    await client.query('COMMIT');
+    
+    // Get the complete item to return
+    const completeItem = await client.query(
+      `SELECT i.*, c.name as category_name, 
+              u.first_name, u.last_name
+       FROM items i
+       LEFT JOIN categories c ON i.category_id = c.id
+       JOIN users u ON i.user_id = u.id
+       WHERE i.id = $1`,
+      [itemId]
+    );
+    
+    res.status(201).json({ 
+      success: true, 
       message: 'Item created successfully and pending approval',
-      item
+      item: completeItem.rows[0]
     });
-
+    
   } catch (error) {
+    await client.query('ROLLBACK');
     console.error('Error creating item:', error);
-    res.status(500).json({ error: 'Server error creating item' });
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ 
+      error: 'Server error creating item',
+      message: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  } finally {
+    client.release();
   }
 });
 

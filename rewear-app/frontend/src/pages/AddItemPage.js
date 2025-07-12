@@ -130,47 +130,78 @@ const AddItemPage = () => {
       data.append('title', formData.title);
       data.append('description', formData.description);
       
-      // Convert category name to categoryId - this is a critical fix
-      // For now using a basic mapping - ideally would fetch categories from backend
+      // Convert category name to categoryId - ensure it's a number
       const categoryMap = {
         'Tops': 1, 'Bottoms': 2, 'Dresses': 3, 'Outerwear': 4,
         'Shoes': 5, 'Accessories': 6, 'Athletic Wear': 7, 'Other': 8
       };
-      data.append('categoryId', categoryMap[formData.category] || 8); // Default to 'Other' if not found
+      
+      // Log detailed information for debugging
+      console.log('Form data being sent:', {
+        title: formData.title,
+        description: formData.description,
+        category: formData.category,
+        categoryId: categoryMap[formData.category] || 8,
+        size: formData.size,
+        condition: formData.condition,
+        pointValue: formData.pointValue,
+        brand: formData.brand,
+        imageCount: imageFiles.length
+      });
+      
+      const categoryId = categoryMap[formData.category] || 8;
+      data.append('categoryId', categoryId);
       
       data.append('type', formData.type || formData.category); // Use category as type if not specified
       data.append('size', formData.size);
       data.append('condition', formData.condition);
-      data.append('pointValue', formData.pointValue); // Backend requires this field
+      data.append('pointValue', Number(formData.pointValue)); // Ensure it's a number
       
       if (formData.brand) {
         data.append('brand', formData.brand);
       }
       
       // Add all images
-      imageFiles.forEach(file => {
+      if (imageFiles.length === 0) {
+        throw new Error('At least one image is required');
+      }
+      
+      imageFiles.forEach((file, index) => {
         data.append('images', file);
+        console.log(`Added image ${index+1}: ${file.name}, size: ${file.size} bytes, type: ${file.type}`);
       });
       
-      console.log('Submitting form data:', Object.fromEntries(data));
-      
-      // Submit the form
-      const response = await axios.post('/api/items', data, {
-        headers: {
-          'Content-Type': 'multipart/form-data'
+      // Submit the form with more detailed error logging
+      try {
+        const response = await axios.post('/api/items', data, {
+          headers: {
+            'Content-Type': 'multipart/form-data'
+          }
+        });
+        
+        // After successful submission
+        await refreshUser(); // Refresh user data (in case points change)
+        navigate(`/items/${response.data.item.id}`);
+        
+      } catch (apiError) {
+        console.error('API Error Details:', apiError);
+        if (apiError.response) {
+          console.error('Error Response Data:', apiError.response.data);
+          console.error('Error Status:', apiError.response.status);
+          console.error('Error Headers:', apiError.response.headers);
+          setSubmissionError(apiError.response.data.message || apiError.response.data.error || 'Server error creating item. Please try again.');
+        } else if (apiError.request) {
+          console.error('No response received:', apiError.request);
+          setSubmissionError('No response received from server. Please check your connection and try again.');
+        } else {
+          setSubmissionError(apiError.message || 'An unknown error occurred. Please try again.');
         }
-      });
-      
-      // After successful submission
-      await refreshUser(); // Refresh user data (in case points change)
-      navigate(`/item/${response.data.item.id}`);
+        throw apiError; // Re-throw to be caught by the outer catch block
+      }
       
     } catch (error) {
       console.error('Error submitting item:', error);
-      setSubmissionError(
-        error.response?.data?.error || 
-        'Something went wrong while submitting your item. Please try again.'
-      );
+      // The detailed error message will be set in the inner catch block
     } finally {
       setLoading(false);
     }
