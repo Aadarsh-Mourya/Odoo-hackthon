@@ -1,0 +1,38 @@
+{
+  "name": "rewear-community-clothing-exchange",
+  "version": "1.0.0",
+  "description": "A sustainable fashion platform for community-driven clothing exchange using a point-based system",
+  "main": "index.js",
+  "scripts": {
+    "dev": "concurrently \"npm run backend:dev\" \"npm run frontend:dev\"",
+    "backend:dev": "cd backend && npm run dev",
+    "frontend:dev": "cd frontend && npm start",
+    "backend:install": "cd backend && npm install",
+    "frontend:install": "cd frontend && npm install",
+    "install:all": "npm run backend:install && npm run frontend:install",
+    "build": "cd frontend && npm run build",
+    "migrate": "cd backend && npm run migrate"
+  },
+  "keywords": [
+    "sustainable fashion",
+    "clothing exchange",
+    "circular economy",
+    "community platform",
+    "react",
+    "nodejs",
+    "postgresql"
+  ],
+  "author": "ReWear Team",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/rewear-app.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-username/rewear-app/issues"
+  },
+  "homepage": "https://github.com/your-username/rewear-app#readme"
+}
